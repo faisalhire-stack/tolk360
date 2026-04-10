@@ -200,19 +200,29 @@ export function Globe({ focusLang }: GlobeProps) {
     });
 
     // Smooth animation with lerp (linear interpolation)
+    let hasReachedTarget = false;
+
     function animate() {
       const lerp = 0.05; // smooth easing factor
 
-      if (targetPhi !== undefined) {
-        // Smoothly rotate to target country
+      if (pointerInteracting.current) {
+        // User is dragging — let them control freely
+        hasReachedTarget = true; // stop snapping back after release
+      } else if (targetPhi !== undefined && !hasReachedTarget) {
+        // Smoothly rotate to target country (only until first arrival)
+        const diff = Math.abs(targetPhi - phiRef.current);
         phiRef.current += (targetPhi - phiRef.current) * lerp;
-      } else if (!pointerInteracting.current) {
+        if (diff < 0.01) hasReachedTarget = true;
+      } else if (targetPhi === undefined) {
         // Auto-rotate when no language selected
         phiRef.current += 0.004;
+        hasReachedTarget = false;
       }
 
-      // Smooth theta (vertical angle)
-      thetaRef.current += (targetTheta - thetaRef.current) * lerp;
+      // Smooth theta (vertical angle) — only when not dragging
+      if (!pointerInteracting.current && !hasReachedTarget) {
+        thetaRef.current += (targetTheta - thetaRef.current) * lerp;
+      }
 
       // Smooth zoom in/out
       scaleRef.current += (targetScale - scaleRef.current) * lerp;
