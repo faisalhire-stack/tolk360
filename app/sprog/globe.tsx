@@ -190,20 +190,19 @@ export function Globe({ focusLang }: GlobeProps) {
 
     if (!canvasRef.current) return;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const globe = createGlobe(canvasRef.current, {
       devicePixelRatio: 2,
       width: width * 2,
       height: width * 2,
       phi: focusPhi ?? 0,
       theta: focusTheta ?? 0.3,
-      dark: 1,
-      diffuse: 1.2,
-      mapSamples: 20000,
-      mapBrightness: 6,
-      baseColor: [0.12, 0.22, 0.39],
-      markerColor: [0.18, 0.46, 0.71],
-      glowColor: [0.12, 0.22, 0.39],
+      dark: 0,
+      diffuse: 3,
+      mapSamples: 40000,
+      mapBrightness: 1.8,
+      baseColor: [0.63, 0.78, 0.88],
+      markerColor: [0.12, 0.22, 0.39],
+      glowColor: [0.83, 0.91, 0.94],
       markers,
       onRender: (state: Record<string, number>) => {
         if (!pointerInteracting.current && !focusTarget) {
