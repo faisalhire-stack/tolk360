@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef } from "react";
+import createGlobe from "cobe";
 
 // Country coordinates with languages
 const countryData: { name: string; lat: number; lng: number; languages: string[] }[] = [
@@ -139,184 +140,105 @@ for (const c of countryData) {
   }
 }
 
-// Mercator projection
-function project(lat: number, lng: number): { x: number; y: number } {
-  const x = ((lng + 180) / 360) * 100;
-  const latRad = (lat * Math.PI) / 180;
-  const mercN = Math.log(Math.tan(Math.PI / 4 + latRad / 2));
-  const y = 50 - (mercN / Math.PI) * 50;
-  return { x, y };
-}
-
-interface WorldMapProps {
+interface GlobeProps {
   focusLang?: string | null;
 }
 
-export function Globe({ focusLang }: WorldMapProps) {
-  const [tooltip, setTooltip] = useState<{ name: string; langs: string[]; x: number; y: number } | null>(null);
+export function Globe({ focusLang }: GlobeProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const phiRef = useRef(0);
+  const pointerInteracting = useRef(false);
+  const pointerX = useRef(0);
 
-  const highlighted = focusLang
-    ? new Set(countryData.filter((c) => c.languages.includes(focusLang)).map((c) => c.name))
+  const markers = focusLang
+    ? countryData
+        .filter((c) => c.languages.includes(focusLang))
+        .map((c) => ({ location: [c.lat, c.lng] as [number, number], size: 0.1 }))
+    : countryData.map((c) => ({
+        location: [c.lat, c.lng] as [number, number],
+        size: 0.04,
+      }));
+
+  const focusTarget = focusLang
+    ? countryData.find((c) => c.languages.includes(focusLang))
     : null;
 
+  const targetPhi = focusTarget
+    ? Math.PI - ((focusTarget.lng * Math.PI) / 180)
+    : undefined;
+  const targetTheta = focusTarget
+    ? (focusTarget.lat * Math.PI) / 180
+    : 0.15;
+
+  useEffect(() => {
+    if (!canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const container = canvas.parentElement!;
+    const size = Math.max(container.clientWidth, 300);
+
+    let animId: number;
+
+    const globe = createGlobe(canvas, {
+      devicePixelRatio: 2,
+      width: size * 2,
+      height: size * 2,
+      phi: targetPhi ?? 0.3,
+      theta: targetTheta,
+      dark: 1,
+      diffuse: 1.2,
+      mapSamples: 16000,
+      mapBrightness: 6,
+      baseColor: [0.3, 0.3, 0.3],
+      markerColor: [0.18, 0.46, 0.71],
+      glowColor: [0.05, 0.05, 0.15],
+      markers,
+    });
+
+    // Animate with requestAnimationFrame + globe.update()
+    function animate() {
+      if (!pointerInteracting.current && !focusTarget) {
+        phiRef.current += 0.004;
+      }
+      globe.update({
+        phi: targetPhi ?? phiRef.current,
+        theta: targetTheta,
+        width: size * 2,
+        height: size * 2,
+        markers,
+      });
+      animId = requestAnimationFrame(animate);
+    }
+    animId = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      globe.destroy();
+    };
+  }, [focusLang]);
+
   return (
-    <div className="relative w-full max-w-[900px] mx-auto">
-      <div className="relative bg-gradient-to-b from-[#e8f1f8] to-[#d5e8f0] rounded-2xl overflow-hidden border border-gray-200/60 shadow-sm">
-        {/* Grid lines */}
-        <svg
-          viewBox="0 0 100 62"
-          className="w-full"
-          style={{ minHeight: 300 }}
-        >
-          {/* Ocean background */}
-          <rect x="0" y="0" width="100" height="62" fill="none" />
-
-          {/* Latitude lines */}
-          {[-60, -40, -20, 0, 20, 40, 60].map((lat) => {
-            const { y } = project(lat, 0);
-            return (
-              <line
-                key={`lat-${lat}`}
-                x1="0"
-                y1={y}
-                x2="100"
-                y2={y}
-                stroke="#b8d4e8"
-                strokeWidth="0.15"
-                strokeDasharray="0.5,0.5"
-              />
-            );
-          })}
-
-          {/* Longitude lines */}
-          {[-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150].map((lng) => {
-            const { x } = project(0, lng);
-            return (
-              <line
-                key={`lng-${lng}`}
-                x1={x}
-                y1="0"
-                x2={x}
-                y2="62"
-                stroke="#b8d4e8"
-                strokeWidth="0.15"
-                strokeDasharray="0.5,0.5"
-              />
-            );
-          })}
-
-          {/* Country dots */}
-          {countryData.map((country) => {
-            const { x, y } = project(country.lat, country.lng);
-            const isHighlighted = highlighted ? highlighted.has(country.name) : false;
-            const isDefault = !highlighted;
-
-            return (
-              <g key={country.name}>
-                {/* Pulse ring for highlighted */}
-                {isHighlighted && (
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r="1.8"
-                    fill="none"
-                    stroke="var(--brand-accent)"
-                    strokeWidth="0.2"
-                    opacity="0.4"
-                  >
-                    <animate
-                      attributeName="r"
-                      from="0.8"
-                      to="2.5"
-                      dur="1.5s"
-                      repeatCount="indefinite"
-                    />
-                    <animate
-                      attributeName="opacity"
-                      from="0.6"
-                      to="0"
-                      dur="1.5s"
-                      repeatCount="indefinite"
-                    />
-                  </circle>
-                )}
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={isHighlighted ? 0.9 : isDefault ? 0.55 : 0.4}
-                  fill={
-                    isHighlighted
-                      ? "var(--brand-primary)"
-                      : isDefault
-                      ? "var(--brand-accent)"
-                      : "#c0cdd8"
-                  }
-                  opacity={highlighted && !isHighlighted ? 0.3 : 1}
-                  className="transition-all duration-300 cursor-pointer"
-                  onMouseEnter={(e) => {
-                    const rect = (e.target as SVGCircleElement).ownerSVGElement?.getBoundingClientRect();
-                    if (rect) {
-                      setTooltip({
-                        name: country.name,
-                        langs: country.languages,
-                        x: ((x / 100) * rect.width) + rect.left,
-                        y: ((y / 62) * rect.height) + rect.top,
-                      });
-                    }
-                  }}
-                  onMouseLeave={() => setTooltip(null)}
-                />
-              </g>
-            );
-          })}
-
-          {/* Denmark highlight ring */}
-          {!highlighted && (() => {
-            const dk = project(56.26, 9.50);
-            return (
-              <circle
-                cx={dk.x}
-                cy={dk.y}
-                r="1.5"
-                fill="none"
-                stroke="var(--brand-primary)"
-                strokeWidth="0.25"
-                opacity="0.5"
-              >
-                <animate
-                  attributeName="r"
-                  from="0.8"
-                  to="2.2"
-                  dur="2s"
-                  repeatCount="indefinite"
-                />
-                <animate
-                  attributeName="opacity"
-                  from="0.6"
-                  to="0"
-                  dur="2s"
-                  repeatCount="indefinite"
-                />
-              </circle>
-            );
-          })()}
-        </svg>
-      </div>
-
-      {/* Tooltip */}
-      {tooltip && (
-        <div
-          className="fixed z-50 px-3 py-2 bg-white rounded-lg shadow-lg border border-gray-200 pointer-events-none"
-          style={{
-            left: tooltip.x,
-            top: tooltip.y - 45,
-            transform: "translateX(-50%)",
-          }}
-        >
-          <p className="text-sm font-semibold text-gray-900">{tooltip.name}</p>
-          <p className="text-xs text-gray-500">{tooltip.langs.join(", ")}</p>
-        </div>
-      )}
+    <div
+      className="relative w-full aspect-square max-w-[550px] mx-auto rounded-2xl overflow-hidden"
+      style={{ background: "radial-gradient(circle at 50% 50%, #1a2744 0%, #0d1525 100%)" }}
+    >
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
+        onPointerDown={(e) => {
+          pointerInteracting.current = true;
+          pointerX.current = e.clientX;
+        }}
+        onPointerUp={() => { pointerInteracting.current = false; }}
+        onPointerOut={() => { pointerInteracting.current = false; }}
+        onPointerMove={(e) => {
+          if (pointerInteracting.current) {
+            const delta = e.clientX - pointerX.current;
+            pointerX.current = e.clientX;
+            phiRef.current += delta / 200;
+          }
+        }}
+      />
     </div>
   );
 }
