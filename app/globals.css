@@ -1,0 +1,94 @@
+@import "tailwindcss";
+
+:root {
+  --brand-primary: #1F3864;
+  --brand-accent: #2E75B6;
+  --brand-light: #D5E8F0;
+  --text-dark: #1a1a1a;
+  --text-muted: #595959;
+  --bg-light: #f8f9fa;
+  --bg-white: #ffffff;
+}
+
+@theme inline {
+  --color-background: var(--bg-white);
+  --color-foreground: var(--text-dark);
+  --color-brand: var(--brand-primary);
+  --color-accent: var(--brand-accent);
+  --color-brand-light: var(--brand-light);
+  --color-muted: var(--text-muted);
+  --font-sans: var(--font-geist-sans);
+}
+
+body {
+  background: var(--bg-white);
+  color: var(--text-dark);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes scroll-left {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@keyframes scroll-right {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+
+.animate-scroll-left {
+  animation: scroll-left 30s linear infinite;
+}
+
+.animate-scroll-right {
+  animation: scroll-right 30s linear infinite;
+}
+
+.animate-scroll-left:hover,
+.animate-scroll-right:hover {
+  animation-play-state: paused;
+}
+
+@keyframes rise-bubble {
+  0% {
+    transform: translateY(100%) translateX(0) scale(0.7);
+    opacity: 0;
+  }
+  5% {
+    opacity: 1;
+  }
+  50% {
+    transform: translateY(-50vh) translateX(var(--sway, 20px)) scale(0.9);
+    opacity: 1;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(-120vh) translateX(var(--sway-end, -10px)) scale(1);
+    opacity: 0;
+  }
+}
+
+.animate-rise-bubble {
+  animation: rise-bubble var(--rise-duration, 12s) linear infinite;
+  animation-delay: var(--rise-delay, 0s);
+}
+
+@keyframes subtitleGlow {
+  0% { opacity: 0.04; transform: translateY(0) scale(1); }
+  100% { opacity: 0.1; transform: translateY(-20px) scale(1.2); }
+}
+
+@keyframes subtitleFadeIn {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.subtitle-line-enter {
+  animation: subtitleFadeIn 0.4s ease-out forwards;
+}
