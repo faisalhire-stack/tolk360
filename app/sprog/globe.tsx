@@ -146,14 +146,16 @@ interface GlobeProps {
 
 export function Globe({ focusLang }: GlobeProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const phiRef = useRef(0);
+  const phiRef = useRef(0.3);
+  const thetaRef = useRef(0.15);
+  const scaleRef = useRef(1);
   const pointerInteracting = useRef(false);
   const pointerX = useRef(0);
 
   const markers = focusLang
     ? countryData
         .filter((c) => c.languages.includes(focusLang))
-        .map((c) => ({ location: [c.lat, c.lng] as [number, number], size: 0.1 }))
+        .map((c) => ({ location: [c.lat, c.lng] as [number, number], size: 0.12 }))
     : countryData.map((c) => ({
         location: [c.lat, c.lng] as [number, number],
         size: 0.04,
@@ -169,6 +171,7 @@ export function Globe({ focusLang }: GlobeProps) {
   const targetTheta = focusTarget
     ? (focusTarget.lat * Math.PI) / 180
     : 0.15;
+  const targetScale = focusTarget ? 1.35 : 1;
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -183,8 +186,8 @@ export function Globe({ focusLang }: GlobeProps) {
       devicePixelRatio: 2,
       width: size * 2,
       height: size * 2,
-      phi: targetPhi ?? 0.3,
-      theta: targetTheta,
+      phi: phiRef.current,
+      theta: thetaRef.current,
       dark: 1,
       diffuse: 1.2,
       mapSamples: 16000,
@@ -192,17 +195,32 @@ export function Globe({ focusLang }: GlobeProps) {
       baseColor: [0.3, 0.3, 0.3],
       markerColor: [0.18, 0.46, 0.71],
       glowColor: [0.05, 0.05, 0.15],
+      scale: scaleRef.current,
       markers,
     });
 
-    // Animate with requestAnimationFrame + globe.update()
+    // Smooth animation with lerp (linear interpolation)
     function animate() {
-      if (!pointerInteracting.current && !focusTarget) {
+      const lerp = 0.05; // smooth easing factor
+
+      if (targetPhi !== undefined) {
+        // Smoothly rotate to target country
+        phiRef.current += (targetPhi - phiRef.current) * lerp;
+      } else if (!pointerInteracting.current) {
+        // Auto-rotate when no language selected
         phiRef.current += 0.004;
       }
+
+      // Smooth theta (vertical angle)
+      thetaRef.current += (targetTheta - thetaRef.current) * lerp;
+
+      // Smooth zoom in/out
+      scaleRef.current += (targetScale - scaleRef.current) * lerp;
+
       globe.update({
-        phi: targetPhi ?? phiRef.current,
-        theta: targetTheta,
+        phi: phiRef.current,
+        theta: thetaRef.current,
+        scale: scaleRef.current,
         width: size * 2,
         height: size * 2,
         markers,
