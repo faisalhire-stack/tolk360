@@ -222,8 +222,8 @@ export function Globe({ focusLang }: GlobeProps) {
     arcGroup: THREE.Group;
     animId: number;
   } | null>(null);
-  const rotationRef = useRef({ y: 0, targetY: 0, targetZoom: 3.8, zoom: 3.8 });
-  const pointerRef = useRef({ down: false, x: 0, reachedTarget: false });
+  const rotationRef = useRef({ y: 0, x: 0, targetY: 0, targetX: 0, targetZoom: 3.8, zoom: 3.8 });
+  const pointerRef = useRef({ down: false, px: 0, py: 0, reachedTarget: false });
   const focusLangRef = useRef(focusLang);
   focusLangRef.current = focusLang;
 
@@ -301,10 +301,15 @@ export function Globe({ focusLang }: GlobeProps) {
 
     // Initial rotation to show Europe
     globe.rotation.y = -0.2;
+    globe.rotation.x = 0;
     markerGroup.rotation.y = -0.2;
+    markerGroup.rotation.x = 0;
     arcGroup.rotation.y = -0.2;
+    arcGroup.rotation.x = 0;
     rotationRef.current.y = -0.2;
     rotationRef.current.targetY = -0.2;
+    rotationRef.current.x = 0;
+    rotationRef.current.targetX = 0;
 
     // Store refs
     sceneRef.current = { renderer, scene, camera, globe, markerGroup, arcGroup, animId: 0 };
@@ -317,24 +322,33 @@ export function Globe({ focusLang }: GlobeProps) {
       if (ptr.down) {
         // User is dragging
         ptr.reachedTarget = true;
-      } else if (!ptr.reachedTarget && ref.targetY !== undefined) {
+      } else if (!ptr.reachedTarget) {
         // Lerp to target
         ref.y += (ref.targetY - ref.y) * 0.04;
-        if (Math.abs(ref.targetY - ref.y) < 0.005) ptr.reachedTarget = true;
+        ref.x += (ref.targetX - ref.x) * 0.04;
+        if (Math.abs(ref.targetY - ref.y) < 0.005 && Math.abs(ref.targetX - ref.x) < 0.005) {
+          ptr.reachedTarget = true;
+        }
       } else if (!focusLangRef.current) {
         // Auto rotate when no language selected
         ref.y += 0.002;
-        ptr.reachedTarget = false;
       }
+
+      // Clamp vertical rotation to avoid flipping
+      ref.x = Math.max(-1.2, Math.min(1.2, ref.x));
 
       // Smooth zoom
       ref.zoom += (ref.targetZoom - ref.zoom) * 0.05;
       camera.position.z = ref.zoom;
 
       globe.rotation.y = ref.y;
+      globe.rotation.x = ref.x;
       markerGroup.rotation.y = ref.y;
+      markerGroup.rotation.x = ref.x;
       arcGroup.rotation.y = ref.y;
+      arcGroup.rotation.x = ref.x;
       atmosphere.rotation.y = ref.y;
+      atmosphere.rotation.x = ref.x;
 
       renderer.render(scene, camera);
       sceneRef.current!.animId = requestAnimationFrame(animate);
@@ -354,14 +368,18 @@ export function Globe({ focusLang }: GlobeProps) {
     // Pointer events for drag
     const onPointerDown = (e: PointerEvent) => {
       pointerRef.current.down = true;
-      pointerRef.current.x = e.clientX;
+      pointerRef.current.px = e.clientX;
+      pointerRef.current.py = e.clientY;
     };
     const onPointerUp = () => { pointerRef.current.down = false; };
     const onPointerMove = (e: PointerEvent) => {
       if (pointerRef.current.down) {
-        const delta = e.clientX - pointerRef.current.x;
-        pointerRef.current.x = e.clientX;
-        rotationRef.current.y += delta * 0.005;
+        const dx = e.clientX - pointerRef.current.px;
+        const dy = e.clientY - pointerRef.current.py;
+        pointerRef.current.px = e.clientX;
+        pointerRef.current.py = e.clientY;
+        rotationRef.current.y += dx * 0.005;
+        rotationRef.current.x += dy * 0.005;
       }
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
@@ -402,7 +420,9 @@ export function Globe({ focusLang }: GlobeProps) {
       // Zoom in and rotate to first highlighted country
       const target = highlighted[0];
       const targetRotY = -(target.lng * Math.PI) / 180 - Math.PI / 2;
+      const targetRotX = (target.lat * Math.PI) / 180 * 0.5;
       rotationRef.current.targetY = targetRotY;
+      rotationRef.current.targetX = targetRotX;
       rotationRef.current.targetZoom = 2.8;
       pointerRef.current.reachedTarget = false;
 
@@ -444,6 +464,8 @@ export function Globe({ focusLang }: GlobeProps) {
     } else {
       // Default: show all countries as small dots, auto-rotate
       rotationRef.current.targetZoom = 3.8;
+      rotationRef.current.targetX = 0;
+      pointerRef.current.reachedTarget = false;
 
       for (const country of countryData) {
         const pos = latLngToVector3(country.lat, country.lng, GLOBE_RADIUS * 1.005);
