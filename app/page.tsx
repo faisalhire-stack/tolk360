@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LogoCarousel } from "./components/LogoCarousel";
 import { SpeechBubbles } from "./components/SpeechBubbles";
 import { TrustLogos } from "./components/TrustLogos";
+import { HomeGlobe } from "./components/HomeGlobe";
 
 function HeroSection() {
   return (
@@ -247,6 +248,7 @@ export default function Home() {
       <HeroSection />
       <TrustLogos />
       <YdelserSection />
+      <HomeGlobe />
       <HvorforSection />
       <LogoCarousel />
       <CTASection />
