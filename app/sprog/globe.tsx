@@ -182,6 +182,28 @@ function createGlowSprite(color: THREE.Color, size: number): THREE.Sprite {
   return sprite;
 }
 
+// Text label sprite for country names
+function createTextSprite(text: string, color: string = "#ffffff"): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = "bold 28px Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(0,0,0,0.7)";
+  ctx.lineWidth = 4;
+  ctx.strokeText(text, 128, 32);
+  ctx.fillStyle = color;
+  ctx.fillText(text, 128, 32);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.25, 0.0625, 1);
+  return sprite;
+}
+
 interface GlobeProps {
   focusLang?: string | null;
 }
@@ -200,8 +222,10 @@ export function Globe({ focusLang }: GlobeProps) {
     arcGroup: THREE.Group;
     animId: number;
   } | null>(null);
-  const rotationRef = useRef({ y: 0, targetY: 0, targetZoom: 3.2, zoom: 3.2 });
+  const rotationRef = useRef({ y: 0, targetY: 0, targetZoom: 3.8, zoom: 3.8 });
   const pointerRef = useRef({ down: false, x: 0, reachedTarget: false });
+  const focusLangRef = useRef(focusLang);
+  focusLangRef.current = focusLang;
 
   // Init scene once
   useEffect(() => {
@@ -221,7 +245,7 @@ export function Globe({ focusLang }: GlobeProps) {
 
     // Camera
     const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
-    camera.position.z = 3.2;
+    camera.position.z = 3.8;
 
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xbbccff, 0.6);
@@ -297,8 +321,8 @@ export function Globe({ focusLang }: GlobeProps) {
         // Lerp to target
         ref.y += (ref.targetY - ref.y) * 0.04;
         if (Math.abs(ref.targetY - ref.y) < 0.005) ptr.reachedTarget = true;
-      } else if (!focusLang) {
-        // Auto rotate
+      } else if (!focusLangRef.current) {
+        // Auto rotate when no language selected
         ref.y += 0.002;
         ptr.reachedTarget = false;
       }
@@ -379,13 +403,16 @@ export function Globe({ focusLang }: GlobeProps) {
       const target = highlighted[0];
       const targetRotY = -(target.lng * Math.PI) / 180 - Math.PI / 2;
       rotationRef.current.targetY = targetRotY;
-      rotationRef.current.targetZoom = 2.4;
+      rotationRef.current.targetZoom = 2.8;
       pointerRef.current.reachedTarget = false;
 
       // Denmark marker (origin)
       const dkSprite = createGlowSprite(new THREE.Color(0x2e75b6), 0.08);
       dkSprite.position.copy(dkPos);
       markerGroup.add(dkSprite);
+      const dkLabel = createTextSprite("Danmark", "#7eb8f0");
+      dkLabel.position.copy(dkPos).normalize().multiplyScalar(GLOBE_RADIUS * 1.06);
+      markerGroup.add(dkLabel);
 
       // Highlighted country markers + arcs from Denmark
       for (const country of highlighted) {
@@ -395,6 +422,11 @@ export function Globe({ focusLang }: GlobeProps) {
         const sprite = createGlowSprite(new THREE.Color(0xff6b35), 0.12);
         sprite.position.copy(pos);
         markerGroup.add(sprite);
+
+        // Country name label
+        const label = createTextSprite(country.name, "#ffb088");
+        label.position.copy(pos).normalize().multiplyScalar(GLOBE_RADIUS * 1.06);
+        markerGroup.add(label);
 
         // Arc from Denmark
         if (country.name !== "Danmark") {
@@ -410,8 +442,8 @@ export function Globe({ focusLang }: GlobeProps) {
         }
       }
     } else {
-      // Default: show all countries as small dots
-      rotationRef.current.targetZoom = 3.2;
+      // Default: show all countries as small dots, auto-rotate
+      rotationRef.current.targetZoom = 3.8;
 
       for (const country of countryData) {
         const pos = latLngToVector3(country.lat, country.lng, GLOBE_RADIUS * 1.005);
