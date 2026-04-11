@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import createGlobe from "cobe";
+import * as THREE from "three";
 
 // Country coordinates with languages
 const countryData: { name: string; lat: number; lng: number; languages: string[] }[] = [
@@ -140,133 +140,297 @@ for (const c of countryData) {
   }
 }
 
+// Convert lat/lng to 3D position on sphere
+function latLngToVector3(lat: number, lng: number, radius: number): THREE.Vector3 {
+  const phi = (90 - lat) * (Math.PI / 180);
+  const theta = (lng + 180) * (Math.PI / 180);
+  return new THREE.Vector3(
+    -(radius * Math.sin(phi) * Math.cos(theta)),
+    radius * Math.cos(phi),
+    radius * Math.sin(phi) * Math.sin(theta)
+  );
+}
+
+// Create a curved arc between two points on the globe
+function createArc(start: THREE.Vector3, end: THREE.Vector3, radius: number): THREE.BufferGeometry {
+  const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+  const dist = start.distanceTo(end);
+  mid.normalize().multiplyScalar(radius + dist * 0.4);
+
+  const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+  const points = curve.getPoints(48);
+  return new THREE.BufferGeometry().setFromPoints(points);
+}
+
+// Glow sprite for markers
+function createGlowSprite(color: THREE.Color, size: number): THREE.Sprite {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, `rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},1)`);
+  gradient.addColorStop(0.3, `rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},0.6)`);
+  gradient.addColorStop(1, `rgba(${Math.round(color.r * 255)},${Math.round(color.g * 255)},${Math.round(color.b * 255)},0)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(size, size, 1);
+  return sprite;
+}
+
 interface GlobeProps {
   focusLang?: string | null;
 }
 
+const DENMARK = { lat: 56.26, lng: 9.50 };
+const GLOBE_RADIUS = 1;
+
 export function Globe({ focusLang }: GlobeProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const phiRef = useRef(0.3);
-  const thetaRef = useRef(0.15);
-  const scaleRef = useRef(1);
-  const pointerInteracting = useRef(false);
-  const pointerX = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const sceneRef = useRef<{
+    renderer: THREE.WebGLRenderer;
+    scene: THREE.Scene;
+    camera: THREE.PerspectiveCamera;
+    globe: THREE.Mesh;
+    markerGroup: THREE.Group;
+    arcGroup: THREE.Group;
+    animId: number;
+  } | null>(null);
+  const rotationRef = useRef({ y: 0, targetY: 0, targetZoom: 3.2, zoom: 3.2 });
+  const pointerRef = useRef({ down: false, x: 0, reachedTarget: false });
 
-  const markers = focusLang
-    ? countryData
-        .filter((c) => c.languages.includes(focusLang))
-        .map((c) => ({ location: [c.lat, c.lng] as [number, number], size: 0.12 }))
-    : countryData.map((c) => ({
-        location: [c.lat, c.lng] as [number, number],
-        size: 0.04,
-      }));
-
-  const focusTarget = focusLang
-    ? countryData.find((c) => c.languages.includes(focusLang))
-    : null;
-
-  const targetPhi = focusTarget
-    ? Math.PI - ((focusTarget.lng * Math.PI) / 180)
-    : undefined;
-  const targetTheta = focusTarget
-    ? (focusTarget.lat * Math.PI) / 180
-    : 0.15;
-  const targetScale = focusTarget ? 1.35 : 1;
-
+  // Init scene once
   useEffect(() => {
-    if (!canvasRef.current) return;
+    if (!containerRef.current) return;
+    const container = containerRef.current;
+    const w = container.clientWidth;
+    const h = container.clientHeight || w;
 
-    const canvas = canvasRef.current;
-    const container = canvas.parentElement!;
-    const size = Math.max(container.clientWidth, 300);
+    // Renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
 
-    let animId: number;
+    // Scene
+    const scene = new THREE.Scene();
 
-    const globe = createGlobe(canvas, {
-      devicePixelRatio: 2,
-      width: size * 2,
-      height: size * 2,
-      phi: phiRef.current,
-      theta: thetaRef.current,
-      dark: 1,
-      diffuse: 1.2,
-      mapSamples: 16000,
-      mapBrightness: 6,
-      baseColor: [0.3, 0.3, 0.3],
-      markerColor: [0.18, 0.46, 0.71],
-      glowColor: [0.05, 0.05, 0.15],
-      scale: scaleRef.current,
-      markers,
+    // Camera
+    const camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 100);
+    camera.position.z = 3.2;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xbbccff, 0.6);
+    scene.add(ambientLight);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(5, 3, 5);
+    scene.add(dirLight);
+
+    // Earth globe
+    const textureLoader = new THREE.TextureLoader();
+    const earthTexture = textureLoader.load("/earth-blue-marble.jpg");
+    earthTexture.colorSpace = THREE.SRGBColorSpace;
+
+    const globeGeo = new THREE.SphereGeometry(GLOBE_RADIUS, 64, 64);
+    const globeMat = new THREE.MeshPhongMaterial({
+      map: earthTexture,
+      bumpScale: 0.02,
+      specular: new THREE.Color(0x333333),
+      shininess: 15,
     });
+    const globe = new THREE.Mesh(globeGeo, globeMat);
+    scene.add(globe);
 
-    // Smooth animation with lerp (linear interpolation)
-    let hasReachedTarget = false;
+    // Atmosphere glow
+    const atmosGeo = new THREE.SphereGeometry(GLOBE_RADIUS * 1.03, 64, 64);
+    const atmosMat = new THREE.ShaderMaterial({
+      vertexShader: `
+        varying vec3 vNormal;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        varying vec3 vNormal;
+        void main() {
+          float intensity = pow(0.65 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0);
+          gl_FragColor = vec4(0.3, 0.6, 1.0, 1.0) * intensity;
+        }
+      `,
+      blending: THREE.AdditiveBlending,
+      side: THREE.BackSide,
+      transparent: true,
+    });
+    const atmosphere = new THREE.Mesh(atmosGeo, atmosMat);
+    scene.add(atmosphere);
 
+    // Groups for markers and arcs
+    const markerGroup = new THREE.Group();
+    scene.add(markerGroup);
+    const arcGroup = new THREE.Group();
+    scene.add(arcGroup);
+
+    // Initial rotation to show Europe
+    globe.rotation.y = -0.2;
+    markerGroup.rotation.y = -0.2;
+    arcGroup.rotation.y = -0.2;
+    rotationRef.current.y = -0.2;
+    rotationRef.current.targetY = -0.2;
+
+    // Store refs
+    sceneRef.current = { renderer, scene, camera, globe, markerGroup, arcGroup, animId: 0 };
+
+    // Animation loop
     function animate() {
-      const lerp = 0.05; // smooth easing factor
+      const ref = rotationRef.current;
+      const ptr = pointerRef.current;
 
-      if (pointerInteracting.current) {
-        // User is dragging — let them control freely
-        hasReachedTarget = true; // stop snapping back after release
-      } else if (targetPhi !== undefined && !hasReachedTarget) {
-        // Smoothly rotate to target country (only until first arrival)
-        const diff = Math.abs(targetPhi - phiRef.current);
-        phiRef.current += (targetPhi - phiRef.current) * lerp;
-        if (diff < 0.01) hasReachedTarget = true;
-      } else if (targetPhi === undefined) {
-        // Auto-rotate when no language selected
-        phiRef.current += 0.004;
-        hasReachedTarget = false;
+      if (ptr.down) {
+        // User is dragging
+        ptr.reachedTarget = true;
+      } else if (!ptr.reachedTarget && ref.targetY !== undefined) {
+        // Lerp to target
+        ref.y += (ref.targetY - ref.y) * 0.04;
+        if (Math.abs(ref.targetY - ref.y) < 0.005) ptr.reachedTarget = true;
+      } else if (!focusLang) {
+        // Auto rotate
+        ref.y += 0.002;
+        ptr.reachedTarget = false;
       }
 
-      // Smooth theta (vertical angle) — only when not dragging
-      if (!pointerInteracting.current && !hasReachedTarget) {
-        thetaRef.current += (targetTheta - thetaRef.current) * lerp;
-      }
+      // Smooth zoom
+      ref.zoom += (ref.targetZoom - ref.zoom) * 0.05;
+      camera.position.z = ref.zoom;
 
-      // Smooth zoom in/out
-      scaleRef.current += (targetScale - scaleRef.current) * lerp;
+      globe.rotation.y = ref.y;
+      markerGroup.rotation.y = ref.y;
+      arcGroup.rotation.y = ref.y;
+      atmosphere.rotation.y = ref.y;
 
-      globe.update({
-        phi: phiRef.current,
-        theta: thetaRef.current,
-        scale: scaleRef.current,
-        width: size * 2,
-        height: size * 2,
-        markers,
-      });
-      animId = requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+      sceneRef.current!.animId = requestAnimationFrame(animate);
     }
-    animId = requestAnimationFrame(animate);
+    sceneRef.current.animId = requestAnimationFrame(animate);
+
+    // Resize handler
+    const onResize = () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight || w;
+      renderer.setSize(w, h);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+    };
+    window.addEventListener("resize", onResize);
+
+    // Pointer events for drag
+    const onPointerDown = (e: PointerEvent) => {
+      pointerRef.current.down = true;
+      pointerRef.current.x = e.clientX;
+    };
+    const onPointerUp = () => { pointerRef.current.down = false; };
+    const onPointerMove = (e: PointerEvent) => {
+      if (pointerRef.current.down) {
+        const delta = e.clientX - pointerRef.current.x;
+        pointerRef.current.x = e.clientX;
+        rotationRef.current.y += delta * 0.005;
+      }
+    };
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointermove", onPointerMove);
 
     return () => {
-      cancelAnimationFrame(animId);
-      globe.destroy();
+      cancelAnimationFrame(sceneRef.current!.animId);
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("resize", onResize);
+      container.removeChild(renderer.domElement);
+      renderer.dispose();
     };
+  }, []);
+
+  // Update markers & arcs when focusLang changes
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    const { markerGroup, arcGroup } = sceneRef.current;
+
+    // Clear previous markers and arcs
+    while (markerGroup.children.length) {
+      markerGroup.remove(markerGroup.children[0]);
+    }
+    while (arcGroup.children.length) {
+      arcGroup.remove(arcGroup.children[0]);
+    }
+
+    const highlighted = focusLang
+      ? countryData.filter((c) => c.languages.includes(focusLang))
+      : null;
+
+    const dkPos = latLngToVector3(DENMARK.lat, DENMARK.lng, GLOBE_RADIUS * 1.005);
+
+    if (highlighted && highlighted.length > 0) {
+      // Zoom in and rotate to first highlighted country
+      const target = highlighted[0];
+      const targetRotY = -(target.lng * Math.PI) / 180 - Math.PI / 2;
+      rotationRef.current.targetY = targetRotY;
+      rotationRef.current.targetZoom = 2.4;
+      pointerRef.current.reachedTarget = false;
+
+      // Denmark marker (origin)
+      const dkSprite = createGlowSprite(new THREE.Color(0x2e75b6), 0.08);
+      dkSprite.position.copy(dkPos);
+      markerGroup.add(dkSprite);
+
+      // Highlighted country markers + arcs from Denmark
+      for (const country of highlighted) {
+        const pos = latLngToVector3(country.lat, country.lng, GLOBE_RADIUS * 1.005);
+
+        // Glowing marker
+        const sprite = createGlowSprite(new THREE.Color(0xff6b35), 0.12);
+        sprite.position.copy(pos);
+        markerGroup.add(sprite);
+
+        // Arc from Denmark
+        if (country.name !== "Danmark") {
+          const arcGeo = createArc(dkPos, pos, GLOBE_RADIUS);
+          const arcMat = new THREE.LineBasicMaterial({
+            color: 0x2e75b6,
+            transparent: true,
+            opacity: 0.6,
+            linewidth: 1,
+          });
+          const arcLine = new THREE.Line(arcGeo, arcMat);
+          arcGroup.add(arcLine);
+        }
+      }
+    } else {
+      // Default: show all countries as small dots
+      rotationRef.current.targetZoom = 3.2;
+
+      for (const country of countryData) {
+        const pos = latLngToVector3(country.lat, country.lng, GLOBE_RADIUS * 1.005);
+        const isDk = country.name === "Danmark";
+        const sprite = createGlowSprite(
+          new THREE.Color(isDk ? 0xff6b35 : 0x2e75b6),
+          isDk ? 0.1 : 0.05
+        );
+        sprite.position.copy(pos);
+        markerGroup.add(sprite);
+      }
+    }
   }, [focusLang]);
 
   return (
     <div
-      className="relative w-full aspect-square max-w-[550px] mx-auto rounded-2xl overflow-hidden"
-      style={{ background: "radial-gradient(circle at 50% 50%, #1a2744 0%, #0d1525 100%)" }}
-    >
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full cursor-grab active:cursor-grabbing"
-        onPointerDown={(e) => {
-          pointerInteracting.current = true;
-          pointerX.current = e.clientX;
-        }}
-        onPointerUp={() => { pointerInteracting.current = false; }}
-        onPointerOut={() => { pointerInteracting.current = false; }}
-        onPointerMove={(e) => {
-          if (pointerInteracting.current) {
-            const delta = e.clientX - pointerX.current;
-            pointerX.current = e.clientX;
-            phiRef.current += delta / 200;
-          }
-        }}
-      />
-    </div>
+      ref={containerRef}
+      className="relative w-full aspect-square max-w-[550px] mx-auto rounded-2xl overflow-hidden cursor-grab active:cursor-grabbing"
+      style={{ background: "radial-gradient(circle at 50% 50%, #0d1a30 0%, #060c18 100%)" }}
+    />
   );
 }
