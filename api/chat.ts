@@ -29,13 +29,23 @@ TONE:
 - Undgå at være for formel eller stiv`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // CORS headers
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
+    console.error("GEMINI_API_KEY not configured");
+    return res.status(500).json({ error: "API key not configured" });
   }
 
   const { messages } = req.body as {
@@ -52,7 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Convert messages to Gemini format
     const history = messages.slice(0, -1).map((m) => ({
-      role: m.role === "assistant" ? "model" as const : "user" as const,
+      role: m.role === "assistant" ? ("model" as const) : ("user" as const),
       parts: [{ text: m.content }],
     }));
 
@@ -63,24 +73,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       systemInstruction: SYSTEM_PROMPT,
     });
 
-    // Stream response
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
+    const result = await chat.sendMessage(lastMessage.content);
+    const text = result.response.text();
 
-    const result = await chat.sendMessageStream(lastMessage.content);
-
-    for await (const chunk of result.stream) {
-      const text = chunk.text();
-      if (text) {
-        res.write(`data: ${JSON.stringify({ text })}\n\n`);
-      }
-    }
-
-    res.write("data: [DONE]\n\n");
-    res.end();
+    return res.status(200).json({ text });
   } catch (error) {
     console.error("Chat API error:", error);
-    res.status(500).json({ error: "Failed to generate response" });
+    return res.status(500).json({ error: "Failed to generate response" });
   }
 }
