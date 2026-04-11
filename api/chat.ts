@@ -1,4 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 const SYSTEM_PROMPT = `Du er Tolk360's sprogrådgiver — en venlig, professionel AI-assistent der hjælper sagsbehandlere, læger, socialrådgivere og andre fagfolk med at finde den rette tolk til deres borgere.
@@ -29,7 +28,6 @@ TONE:
 - Undgå at være for formel eller stiv`;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -44,7 +42,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.error("GEMINI_API_KEY not configured");
     return res.status(500).json({ error: "API key not configured" });
   }
 
@@ -57,24 +54,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
-    // Convert messages to Gemini format
-    const history = messages.slice(0, -1).map((m) => ({
-      role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+    // Build Gemini API request body using REST API directly (no SDK needed)
+    const contents = messages.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
     }));
 
-    const lastMessage = messages[messages.length - 1];
+    const body = {
+      system_instruction: {
+        parts: [{ text: SYSTEM_PROMPT }],
+      },
+      contents,
+    };
 
-    const chat = model.startChat({
-      history: history.slice(-10),
-      systemInstruction: SYSTEM_PROMPT,
-    });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
 
-    const result = await chat.sendMessage(lastMessage.content);
-    const text = result.response.text();
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Gemini API error:", response.status, errText);
+      return res.status(500).json({ error: "AI service error" });
+    }
+
+    const data = await response.json();
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text || "Beklager, jeg kunne ikke generere et svar.";
 
     return res.status(200).json({ text });
   } catch (error) {
