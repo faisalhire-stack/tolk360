@@ -5,6 +5,7 @@ import { TopBar } from "./components/TopBar";
 import { Header } from "./components/Header";
 import { Footer } from "./components/Footer";
 import { CookieConsent } from "./components/CookieConsent";
+import { ChatWidget } from "./components/ChatWidget";
 
 const inter = Inter({
   variable: "--font-geist-sans",
@@ -119,6 +120,7 @@ export default function RootLayout({
         <main className="flex-1">{children}</main>
         <Footer />
         <CookieConsent />
+        <ChatWidget />
       </body>
     </html>
   );
