@@ -172,7 +172,7 @@ const aliaser: Record<string, string> = {
   "nordafrika": "marokko", // default
 };
 
-type Message = { role: "user" | "bot"; text: string; cta?: boolean };
+type Message = { role: "user" | "bot"; text: string; cta?: boolean; streaming?: boolean };
 
 function findCountry(input: string): { land: string; data: { sprog: string[]; info: string } } | null {
   const lower = input.toLowerCase().trim();
@@ -233,14 +233,69 @@ function generateResponse(input: string): Message[] {
   return [{ role: "bot", text: "Jeg er ikke helt sikker på, hvad du mener. Prøv at skriv et land — fx \"Somalia\", \"Tyrkiet\" eller \"Afghanistan\" — så fortæller jeg dig hvilke sprog der tales der, og hjælper dig med at finde den rette tolk." }];
 }
 
+async function streamAIResponse(
+  chatHistory: Message[],
+  onChunk: (text: string) => void,
+  onDone: () => void,
+  onError: () => void,
+) {
+  try {
+    const apiMessages = chatHistory
+      .filter((m) => m.role === "user" || m.role === "bot")
+      .map((m) => ({ role: m.role === "bot" ? "assistant" as const : "user" as const, content: m.text }));
+
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: apiMessages }),
+    });
+
+    if (!res.ok) throw new Error("API error");
+
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No reader");
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          const data = line.slice(6).trim();
+          if (data === "[DONE]") {
+            onDone();
+            return;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.text) onChunk(parsed.text);
+          } catch {}
+        }
+      }
+    }
+    onDone();
+  } catch {
+    onError();
+  }
+}
+
 export function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
     { role: "bot", text: "Hej! Jeg er Tolk360's sprogrådgiver. Hvilken borger har du brug for tolk til? Fortæl mig hvilket land de kommer fra, så finder vi det rette sprog." },
   ]);
   const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const streamTextRef = useRef("");
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -250,15 +305,64 @@ export function ChatWidget() {
     if (isOpen) inputRef.current?.focus();
   }, [isOpen]);
 
-  function handleSend() {
+  async function handleSend() {
     const text = input.trim();
-    if (!text) return;
+    if (!text || isStreaming) return;
 
     const userMsg: Message = { role: "user", text };
-    const botResponses = generateResponse(text);
-
-    setMessages((prev) => [...prev, userMsg, ...botResponses]);
     setInput("");
+
+    // Try AI first, fall back to rule-based
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
+    setIsStreaming(true);
+    streamTextRef.current = "";
+
+    // Add empty streaming message
+    const streamingMsg: Message = { role: "bot", text: "", streaming: true };
+    setMessages([...updatedMessages, streamingMsg]);
+
+    await streamAIResponse(
+      updatedMessages,
+      (chunk) => {
+        streamTextRef.current += chunk;
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last.streaming) {
+            updated[updated.length - 1] = { ...last, text: streamTextRef.current };
+          }
+          return updated;
+        });
+      },
+      () => {
+        // Done streaming — finalize message and add CTA
+        setMessages((prev) => {
+          const updated = [...prev];
+          const last = updated[updated.length - 1];
+          if (last.streaming) {
+            updated[updated.length - 1] = { role: "bot", text: last.text };
+            // Add CTA message
+            updated.push({
+              role: "bot",
+              text: "Vi er klar til at hjælpe dig med den rette tolk.",
+              cta: true,
+            });
+          }
+          return updated;
+        });
+        setIsStreaming(false);
+      },
+      () => {
+        // Error — fall back to rule-based
+        const botResponses = generateResponse(text);
+        setMessages((prev) => {
+          const updated = prev.filter((m) => !m.streaming);
+          return [...updated, ...botResponses];
+        });
+        setIsStreaming(false);
+      },
+    );
   }
 
   return (
@@ -314,6 +418,13 @@ export function ChatWidget() {
                   }`}
                 >
                   {msg.text}
+                  {msg.streaming && !msg.text && (
+                    <span className="inline-flex gap-1 py-1">
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                      <span className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                    </span>
+                  )}
                   {msg.cta && (
                     <div className="mt-3 flex flex-col gap-2">
                       <a
@@ -355,7 +466,7 @@ export function ChatWidget() {
               />
               <button
                 type="submit"
-                disabled={!input.trim()}
+                disabled={!input.trim() || isStreaming}
                 className="w-10 h-10 rounded-xl bg-[var(--brand-accent)] text-white flex items-center justify-center hover:brightness-110 transition-all disabled:opacity-40 shrink-0"
                 aria-label="Send"
               >
