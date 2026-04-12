@@ -22,9 +22,6 @@ const logos = [
   "Viborg Kommune",
   "Kolding Kommune",
   "Roskilde Kommune",
-  // Organisationer
-  "ASE",
-  "Kromann Reumert",
 ];
 
 function LogoItem({ name }: { name: string }) {

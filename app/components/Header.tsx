@@ -128,7 +128,7 @@ export function Header() {
 
       {/* Mobile nav */}
       {mobileOpen && (
-        <div className="lg:hidden border-t border-gray-100 bg-white">
+        <div className="lg:hidden border-t border-gray-100 bg-white max-h-[calc(100dvh-64px)] overflow-y-auto">
           <nav className="px-4 py-4 space-y-1">
             {navItems.map((item) => (
               <div key={item.href}>
