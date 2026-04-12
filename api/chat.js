@@ -1,5 +1,3 @@
-import type { VercelRequest, VercelResponse } from "@vercel/node";
-
 const SYSTEM_PROMPT = `Du er Tolk360's sprogrådgiver — en venlig, professionel AI-assistent der hjælper sagsbehandlere, læger, socialrådgivere og andre fagfolk med at finde den rette tolk til deres borgere.
 
 DIN EKSPERTISE:
@@ -27,7 +25,7 @@ TONE:
 - Som en erfaren kollega der deler sin viden
 - Undgå at være for formel eller stiv`;
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+module.exports = async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -45,16 +43,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: "API key not configured" });
   }
 
-  const { messages } = req.body as {
-    messages: { role: "user" | "assistant"; content: string }[];
-  };
+  const { messages } = req.body || {};
 
   if (!messages || !Array.isArray(messages)) {
     return res.status(400).json({ error: "messages required" });
   }
 
   try {
-    // Build Gemini API request body using REST API directly (no SDK needed)
     const contents = messages.map((m) => ({
       role: m.role === "assistant" ? "model" : "user",
       parts: [{ text: m.content }],
@@ -79,16 +74,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!response.ok) {
       const errText = await response.text();
       console.error("Gemini API error:", response.status, errText);
-      return res.status(500).json({ error: "AI service error" });
+      return res.status(500).json({ error: "AI service error", status: response.status, detail: errText.substring(0, 500) });
     }
 
     const data = await response.json();
     const text =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text || "Beklager, jeg kunne ikke generere et svar.";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Beklager, jeg kunne ikke generere et svar.";
 
     return res.status(200).json({ text });
   } catch (error) {
     console.error("Chat API error:", error);
     return res.status(500).json({ error: "Failed to generate response" });
   }
-}
+};
